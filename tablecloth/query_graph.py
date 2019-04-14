@@ -27,35 +27,6 @@ class CyclicDependencyError(Exception):
     pass
 
 
-class TableSource(object):
-    """A collection of source tables which may require WITH statements.
-
-    For each source table, the class defines how the query should
-    refer to the table (inline_name) and an optional query to
-    include in a with statement (with_text).
-
-    The caller has its own name for each table (reference_name) when
-    calling the lookup functions.
-
-    This default implementation takas a dictionary that maps reference_name
-    to inline_name, and does not allow with statements. Subclasses should
-    override the with_text() function to include with statements.
-    """
-
-    def __init__(self, table_dict=None):
-        self._table_dict = table_dict or {}
-
-    @property
-    def available_tables(self):
-        return set(self._table_dict.keys())
-
-    def inline_name(self, reference_name):
-        return self._table_dict[reference_name]
-
-    def with_text(self, reference_name):
-        return None
-
-
 class QueryBuilder(object):
     """Tracks the dependencies and with statements to build a single query.
 
