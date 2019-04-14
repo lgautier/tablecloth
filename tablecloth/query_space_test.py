@@ -1,7 +1,7 @@
-"""Unit tests for query_graph.py"""
+"""Unit tests for query_space.py"""
 
-from query_graph import QueryGraph
-from query_graph import NameNotFoundError, CyclicDependencyError
+from query_space import QuerySpace
+from query_space import NameNotFoundError, CyclicDependencyError
 import pytest
 
 
@@ -14,14 +14,14 @@ def test_homogenize():
 
 
 def test_compile_single_node():
-    graph = QueryGraph()
+    space = QuerySpace()
 
-    graph['my_query'] = '''
+    space['my_query'] = '''
 SELECT *
 FROM {{my_table}}
 '''
 
-    query = graph.compile(
+    query = space.compile(
         'my_query', {'my_table': 'source_table'})
 
     assert homogenize(query) == homogenize('''
@@ -31,24 +31,24 @@ FROM source_table
 
 
 def test_name_not_found():
-    graph = QueryGraph()
+    space = QuerySpace()
 
-    graph['my_query'] = '''
+    space['my_query'] = '''
 SELECT *
 FROM {{my_table}}
 '''
 
     with pytest.raises(NameNotFoundError):
-        assert graph.compile('my_query', {})
+        assert space.compile('my_query', {})
 
 
 def test_multiple_nodes():
-    graph = QueryGraph()
-    graph['query2'] = 'SELECT * FROM {{query1}}'
-    graph['query1'] = 'SELECT * FROM {{my_table}}'
-    graph['query3'] = 'SELECT * FROM {{query2}}'
+    space = QuerySpace()
+    space['query2'] = 'SELECT * FROM {{query1}}'
+    space['query1'] = 'SELECT * FROM {{my_table}}'
+    space['query3'] = 'SELECT * FROM {{query2}}'
 
-    query = graph.compile(
+    query = space.compile(
         'query3', {'my_table': 'source_table'})
 
     assert homogenize(query) == homogenize('''
@@ -57,7 +57,7 @@ WITH
   query2 AS ( SELECT * FROM query1)
 SELECT * FROM query2''')
 
-    query = graph.compile(
+    query = space.compile(
         'query3', {'query2': 'source_table'})
 
     assert homogenize(query) == homogenize('''
@@ -65,11 +65,11 @@ SELECT * FROM source_table''')
 
 
 def test_template_parameters():
-    graph = QueryGraph()
-    graph['query1'] = 'SELECT {v1} FROM {{my_table}}'
-    graph['query2'] = 'SELECT {v2} FROM {{query1}}'
+    space = QuerySpace()
+    space['query1'] = 'SELECT {v1} FROM {{my_table}}'
+    space['query2'] = 'SELECT {v2} FROM {{query1}}'
 
-    query = graph.compile(
+    query = space.compile(
         'query2', {'my_table': 'source_table'},
         {'v1': 'variable_1', 'v2': 'variable_2'})
 
@@ -80,13 +80,13 @@ SELECT variable_2 FROM query1''')
 
 
 def test_reuse_previously_seen_nodes():
-    graph = QueryGraph()
-    graph['query2'] = 'SELECT * FROM {{query1}}'
-    graph['query1'] = 'SELECT * FROM {{my_table}}'
-    graph['query3'] = 'SELECT * FROM {{query1}}'
-    graph['query4'] = 'SELECT * FROM {{query2}} JOIN {{query3}}'
+    space = QuerySpace()
+    space['query2'] = 'SELECT * FROM {{query1}}'
+    space['query1'] = 'SELECT * FROM {{my_table}}'
+    space['query3'] = 'SELECT * FROM {{query1}}'
+    space['query4'] = 'SELECT * FROM {{query2}} JOIN {{query3}}'
 
-    query = graph.compile(
+    query = space.compile(
         'query4', {'my_table': 'source_table'})
 
     assert homogenize(query) == homogenize('''
@@ -97,10 +97,10 @@ WITH
 SELECT * FROM query2 JOIN query3''')
 
 
-def test_detect_graph_cycles():
-    graph = QueryGraph()
-    graph['query1'] = 'SELECT * FROM {{query2}}'
-    graph['query2'] = 'SELECT * FROM {{query3}}'
+def test_detect_space_cycles():
+    space = QuerySpace()
+    space['query1'] = 'SELECT * FROM {{query2}}'
+    space['query2'] = 'SELECT * FROM {{query3}}'
 
     with pytest.raises(CyclicDependencyError):
-        graph['query3'] = 'SELECT * FROM {{query1}}'
+        space['query3'] = 'SELECT * FROM {{query1}}'

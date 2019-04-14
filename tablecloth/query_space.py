@@ -1,13 +1,13 @@
-"""Defines the QueryGraph and related classes.
+"""Defines the QuerySpace and related classes.
 
 Sample usage:
 
-    graph = QueryGraph()
-    graph['query1'] = 'SELECT * FROM {{my_table}}'
-    graph['query2'] = 'SELECT * FROM {{query1}}'
-    graph['query3'] = 'SELECT * FROM {{query2}}'
+    space = QuerySpace()
+    space['query1'] = 'SELECT * FROM {{my_table}}'
+    space['query2'] = 'SELECT * FROM {{query1}}'
+    space['query3'] = 'SELECT * FROM {{query2}}'
 
-    query = graph.compile(
+    query = space.compile(
         'query3', {'my_table': 'source_table'})
 """
 
@@ -18,7 +18,7 @@ DEPENDENCY_REGEX = re.compile('{{(.*?)}}')
 
 
 class NameNotFoundError(Exception):
-    """Exception when a requested QueryNode is not in the query graph."""
+    """Exception when a requested QueryNode is not in the query space."""
     pass
 
 
@@ -30,7 +30,7 @@ class CyclicDependencyError(Exception):
 class QueryBuilder(object):
     """Tracks the dependencies and with statements to build a single query.
 
-    The lifetime of this object is from when QueryGraph.compile() is called
+    The lifetime of this object is from when QuerySpace.compile() is called
     to when the query is returned. It tracks the with statements for this
     single query and passes each QueryNode the key/value pairs it needs.
 
@@ -45,9 +45,9 @@ class QueryBuilder(object):
     that this second QueryNode needs.
     """
 
-    def __init__(self, table_map, graph, template_parameters):
+    def __init__(self, table_map, space, template_parameters):
         self._table_map = table_map
-        self._graph = graph
+        self._space = space
         self._template_parameters = template_parameters or {}
         self._with_list = []
         # Maps inline name to reference name.
@@ -68,9 +68,9 @@ class QueryBuilder(object):
             inline = self._table_map[reference_name]
             self._visited_nodes[reference_name] = inline
             return inline
-        elif reference_name in self._graph.available_nodes:
+        elif reference_name in self._space.available_nodes:
             self._visited_nodes[reference_name] = reference_name
-            node = self._graph.query_node(reference_name)
+            node = self._space.query_node(reference_name)
             with_text = node.compile(self)
             self._with_list.append((reference_name, with_text))
             return reference_name
@@ -81,7 +81,7 @@ class QueryBuilder(object):
 
 
 class QueryNode(object):
-    """A single node in a QueryGraph.
+    """A single node in a QuerySpace.
 
     The node is responsible for identifying its dependencies and
     substituting inline names (either source tables or query nodes)
@@ -118,8 +118,8 @@ class QueryNode(object):
                     .format(**substitutions))
 
 
-class QueryGraph(object):
-    """A compute graph of subqueries."""
+class QuerySpace(object):
+    """A compute space of subqueries."""
 
     def __init__(self):
         self._query_nodes = {}
