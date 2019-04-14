@@ -3,12 +3,12 @@
 Sample usage:
 
     graph = QueryGraph()
-    graph.add_node('query1', 'SELECT * FROM {{my_table}}')
-    graph.add_node('query2', 'SELECT * FROM {{query1}}')
-    graph.add_node('query3', 'SELECT * FROM {{query2}}')
+    graph['query1'] = 'SELECT * FROM {{my_table}}'
+    graph['query2'] = 'SELECT * FROM {{query1}}'
+    graph['query3'] = 'SELECT * FROM {{query2}}'
 
     query = graph.compile(
-        'query3', TableSource({'my_table': 'source_table'}))
+        'query3', {'my_table': 'source_table'})
 """
 
 import re
