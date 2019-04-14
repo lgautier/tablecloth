@@ -74,8 +74,8 @@ class QueryBuilder(object):
     that this second QueryNode needs.
     """
 
-    def __init__(self, table_source, graph, template_parameters):
-        self._table_source = table_source
+    def __init__(self, table_map, graph, template_parameters):
+        self._table_map = table_map
         self._graph = graph
         self._template_parameters = template_parameters or {}
         self._with_list = []
@@ -93,12 +93,9 @@ class QueryBuilder(object):
     def get_inline_name(self, reference_name, from_query):
         if reference_name in self._visited_nodes:
             return self._visited_nodes[reference_name]
-        elif reference_name in self._table_source.available_tables:
-            inline = self._table_source.inline_name(reference_name)
-            with_text = self._table_source.with_text(reference_name)
+        elif reference_name in self._table_map:
+            inline = self._table_map[reference_name]
             self._visited_nodes[reference_name] = inline
-            if with_text:
-                self._with_list.append((inline, with_text))
             return inline
         elif reference_name in self._graph.available_nodes:
             self._visited_nodes[reference_name] = reference_name
@@ -156,7 +153,7 @@ class QueryGraph(object):
     def __init__(self):
         self._query_nodes = {}
 
-    def add_node(self, reference_name, query_text):
+    def __setitem__(self, reference_name, query_text):
         new_node = QueryNode(reference_name, query_text)
         for d in new_node.dependency_list:
             if self.find_in_dependencies(d, reference_name):
@@ -185,8 +182,8 @@ class QueryGraph(object):
                 queue += self.query_node(next_node).dependency_list
         return False
 
-    def compile(self, target_name, table_source, template_parameters=None):
-        query_builder = QueryBuilder(table_source, self, template_parameters)
+    def compile(self, target_name, table_map, template_parameters=None):
+        query_builder = QueryBuilder(table_map, self, template_parameters)
         main_query = self.query_node(target_name).compile(query_builder)
 
         query = ''
