@@ -20,10 +20,9 @@ Sample usage:
     )
 """
 
+import abc
 import string
 import uuid
-
-_sql_formatter = string.Formatter()
 
 
 class NameNotFoundError(Exception):
@@ -36,7 +35,25 @@ class CyclicDependencyError(Exception):
     pass
 
 
-class TableName(object):
+class AbstractQueryNode(metaclass=abc.ABCMeta):
+    """A single node in a QuerySpace.
+
+    A concrete child class is responsible for implementing how 
+    to return dependency keys (strings identifying notes) as well as
+    for interpolating values for these dependencies.
+    """
+
+    @property
+    @abc.abstractmethod
+    def dependencies(self):
+        pass
+
+    @abc.abstractmethod
+    def render(self, **kwargs):
+        pass
+
+
+class TableName(AbstractQueryNode):
     """A table name.
 
     The name represents the name of the table as known by an SQL interpreter
@@ -53,8 +70,12 @@ class TableName(object):
     def dependencies(self):
         return tuple()
 
+    def render(self, **kwargs):
+        # TODO: should a non-empty kwargs raise an exception ?
+        return self.sql
 
-class QueryTemplate(object):
+
+class QueryTemplate(AbstractQueryNode):
     """An SQL query template.
 
     The string should be an SQL query template that would evaluate
@@ -66,12 +87,18 @@ class QueryTemplate(object):
     parent nodes in the DAG.
     """
 
+    _sql_formatter = string.Formatter()
+
     def __init__(self, template):
         self.sql = template
 
     @property
     def dependencies(self):
-        return tuple(x[1] for x in _sql_formatter.parse(self.sql))
+        return tuple(x[1] for x in self._sql_formatter.parse(self.sql))
+
+    def render(self, **kwargs):
+        # TODO: shouldn't the rendered string be wrapped in parenthesis ?
+        return self._sql_formatter.format(self.sql, **kwargs)
 
                     
 class QuerySpace(object):
@@ -131,10 +158,21 @@ class QuerySpace(object):
         assert name in self._query_nodes
         renders = dict()
         for name in self.iter_topological(keys=self.dependencies(name)):
-             renders[name] = _sql_formatter.format(self[name].sql, **renders)
+             renders[name] = self[name].render(**renders)
         return renders[name]
 
     def iter_topological(self, keys=None):
+        """Iterate over keys in a topological order.
+
+        Iterating in a topological order means that each for each
+        key returned we are garanteed that all eventual dependencies
+        were returned in an earlier iteration.
+
+        Args:
+        - keys: an optional subset of keys.
+        Returns:
+        An iterator over keys.
+        """
         if keys is None:
             keys = set(self.keys())
         # TODO: Naive implementation
