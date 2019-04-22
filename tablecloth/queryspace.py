@@ -21,6 +21,9 @@ Sample usage:
 """
 
 import abc
+import collections
+import copy
+import os
 import string
 import uuid
 
@@ -35,8 +38,8 @@ class CyclicDependencyError(Exception):
     pass
 
 
-class AbstractQueryNode(metaclass=abc.ABCMeta):
-    """A single node in a QuerySpace.
+class AbstractQueryElement(metaclass=abc.ABCMeta):
+    """An elements in a QuerySpace.
 
     A concrete child class is responsible for implementing how 
     to return dependency keys (strings identifying notes) as well as
@@ -53,7 +56,22 @@ class AbstractQueryNode(metaclass=abc.ABCMeta):
         pass
 
 
-class TableName(AbstractQueryNode):
+class Placeholder(AbstractQueryElement):
+    """A placeholder.
+    """
+
+    def __init__(self):
+        pass
+
+    @property
+    def dependencies(self):
+        return tuple()
+
+    def render(self, **kwargs):
+        raise Exception('Placeholders cannot be rendered.')
+
+
+class TableName(AbstractQueryElement):
     """A table name.
 
     The name represents the name of the table as known by an SQL interpreter
@@ -70,12 +88,16 @@ class TableName(AbstractQueryNode):
     def dependencies(self):
         return tuple()
 
+    @property
+    def isinline(self):
+        True
+
     def render(self, **kwargs):
         # TODO: should a non-empty kwargs raise an exception ?
         return self.sql
 
 
-class QueryTemplate(AbstractQueryNode):
+class QueryTemplate(AbstractQueryElement):
     """An SQL query template.
 
     The string should be an SQL query template that would evaluate
@@ -89,30 +111,85 @@ class QueryTemplate(AbstractQueryNode):
 
     _sql_formatter = string.Formatter()
 
-    def __init__(self, template):
+    def __init__(self, template,
+                 inline=False):
         self.sql = template
+        self._inline = inline
 
     @property
     def dependencies(self):
         return tuple(x[1] for x in self._sql_formatter.parse(self.sql))
 
-    def render(self, **kwargs):
-        # TODO: shouldn't the rendered string be wrapped in parenthesis ?
-        return self._sql_formatter.format(self.sql, **kwargs)
+    @property
+    def isinline(self):
+        return self._inline
 
-                    
+    def render(self, **kwargs):
+        return '(%s)' % self._sql_formatter.format(self.sql, **kwargs)
+
+
+# TODO: use an existing graph library or just an overkill ?
+class DAG(object):
+
+    def __init__(self):
+        self._nodes = set()
+        self._forward = collections.defaultdict(set)
+        self._reverse = collections.defaultdict(set)
+
+    def __contains__(self, key):
+        return key in self._nodes
+
+    def __len__(self):
+        return len(self._nodes)
+
+    def __repr__(self):
+        return os.linesep.join(
+            (super().__repr__(),
+             '%i nodes' % len(self._nodes),
+             '%i edges' % self.n_edges)
+        )
+
+    @property
+    def n_edges(self):
+        return sum(len(x) for x in self._forward.values())
+    
+    def remove_edge(self, key_a, key_b):
+        self._reverse[key_b].remove(key_a)
+        self._forward[key_a].remove(key_b)
+        
+    def add_edge(self, key_a, key_b):
+        self._nodes.add(key_a)
+        self._nodes.add(key_b)
+        self._forward[key_a].add(key_b)
+        self._reverse[key_b].add(key_a)
+
+    def edges_to(self, key):
+        return tuple(self._reverse[key])
+    
+    def edges_from(self, key):
+        return tuple(self._forward[key])
+
+
 class QuerySpace(object):
     """A "namespace" of SQL queries."""
 
     def __init__(self, d={}):
-        self._query_nodes = dict(d)
-
+        self._query_nodes = dict()
+        self._dag = DAG()
+        for k, v in d.items():
+            self[k] = v
+        
     def __getitem__(self, name):
         return self._query_nodes[name]
     
     def __setitem__(self, name, value):
+        assert isinstance(value, AbstractQueryElement)
+        if name in self and not isinstance(self[name], Placeholder):
+            raise NotImplementedError(
+                'Replacing other elements than placeholders is not yet implemented.'
+            )
         if name in value.dependencies:
-            raise CyclicDependencyError(
+            raise qs.CyclicDependencyError(
                 '{} would depend on itself'.format(name)
             )
         cycles = []
@@ -120,18 +197,25 @@ class QuerySpace(object):
             if self.has_dependency(depname, name):
                 cycles.append(depname)
         if cycles:
-            raise CyclicDependencyError(
+            raise qs.CyclicDependencyError(
                 '{} has a cyclic dependency via ({})'.format(
                     name, ', '.join(cycles))
             )
-        self._query_nodes[name] = new_node
+        self._query_nodes[name] = value
+        for d in value.dependencies:
+            if d not in self._query_nodes:
+                self._query_nodes[d] = Placeholder()
+            self._dag.add_edge(d, name)
 
     def __iter__(self):
         return self.keys()
 
+    def __contains__(self, key):
+        return key in self._query_nodes
+
     def dependencies(self, key):
         res = set()
-        queue = set(key.dependencies)
+        queue = set(self[key].dependencies)
         while queue:
             k = queue.pop()
             res.add(k)
@@ -156,10 +240,37 @@ class QuerySpace(object):
 
     def make(self, name, *args, **kwargs):
         assert name in self._query_nodes
+        new_nodes = {}
+        if len(args) == 1:
+            new_nodes.update(args[0])
+        elif len(args) > 1:
+            raise ValueError('At most two unnamed parameters can be specified.')
+        new_nodes.update(kwargs)
         renders = dict()
-        for name in self.iter_topological(keys=self.dependencies(name)):
-             renders[name] = self[name].render(**renders)
-        return renders[name]
+        render_defs = []
+        for cur_name in self.iter_topological(keys=self.dependencies(name)):
+            if cur_name in new_nodes:
+                assert isinstance(self[cur_name], Placeholder)
+                cur_node = new_nodes[cur_name]
+            else:
+                cur_node = self[cur_name]
+            if cur_node.isinline:
+                renders[cur_name] = cur_node.render(**renders)
+            else:
+                renders[cur_name] = cur_name
+                render_defs.append(
+                    (cur_name,
+                     cur_node.render(**renders)))
+        if len(render_defs) == 0:
+            return renders[name]
+        elif render_defs == 1:
+            return renders_defs[0][1]
+        else:
+            return os.linesep.join(
+                ('WITH',
+                 ', '.join('%s AS %s' % (k, v) for k, v in render_defs[:-1]),
+                 render_defs[-1][1])
+            )
 
     def iter_topological(self, keys=None):
         """Iterate over keys in a topological order.
@@ -175,9 +286,23 @@ class QuerySpace(object):
         """
         if keys is None:
             keys = set(self.keys())
-        # TODO: Naive implementation
-        while keys:
-            for k in keys:
-                if not self[k].dependencies:
-                    keys.remove(k)
-                    yield k
+        # Kahn's algorithm
+        dag = copy.deepcopy(self._dag)
+        sorted_keys = list()
+        without_dep = set()
+
+        for k in keys:
+            deps = self[k].dependencies
+            if not deps:
+                without_dep.add(k)
+        while len(without_dep) > 0:
+            n = without_dep.pop()
+            sorted_keys.append(n)
+            for m in dag.edges_from(n):
+                dag.remove_edge(n, m)
+                if not dag.edges_to(m):
+                    without_dep.add(m)
+        if dag.n_edges:
+            raise CyclicDependencyError()
+        else:
+            return tuple(sorted_keys)
