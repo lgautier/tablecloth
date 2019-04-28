@@ -1,7 +1,7 @@
-"""Unit tests for query_space.py"""
+"""Unit tests for queryspace.py"""
 
-from query_space import QuerySpace
-from query_space import NameNotFoundError, CyclicDependencyError
+from queryspace import QuerySpace
+from queryspace import NameNotFoundError, CyclicDependencyError
 import pytest
 
 
