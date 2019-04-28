@@ -1,4 +1,4 @@
-"""Unit tests for query_space.py"""
+"""Unit tests for queryspace.py"""
 
 import tablecloth.queryspace as qs
 import pytest
