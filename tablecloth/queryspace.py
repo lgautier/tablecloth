@@ -39,11 +39,12 @@ class CyclicDependencyError(Exception):
 
 
 class AbstractQueryElement(metaclass=abc.ABCMeta):
-    """An elements in a QuerySpace.
+    """An element in a QuerySpace.
 
-    A concrete child class is responsible for implementing how 
-    to return dependency keys (strings identifying notes) as well as
-    for interpolating values for these dependencies.
+    Concrete child classes are responsible for implementing how 
+    to return dependency keys (strings identifying other
+    `AbstractQueryElements` in a `QuerySpace`) as well as
+    for interpolating values for these dependencies keys when given.
     """
 
     @property
