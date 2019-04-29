@@ -5,9 +5,9 @@ Sample usage:
     import tablecloth as tc 
 
     qs = tc.QuerySpace()
-    qs['query1'] = tc.QueryTemplate('SELECT * FROM {my_table}')
-    qs['query2'] = tc.QueryTemplate('SELECT * FROM {query1}')
-    qs['query3'] = tc.QueryTemplate('SELECT * FROM {query2}')
+    qs['query1'] = tc.QueryTemplate('SELECT * FROM {qs.my_table}')
+    qs['query2'] = tc.QueryTemplate('SELECT * FROM {qs.query1}')
+    qs['query3'] = tc.QueryTemplate('SELECT * FROM {qs.query2}')
 
     sql = qs.make(
         'query3', {'my_table': tc.TableName('source_table')}
@@ -52,8 +52,17 @@ class AbstractQueryElement(metaclass=abc.ABCMeta):
     def dependencies(self):
         pass
 
+    @property
+    @abc.abstractmethod
+    def isinline(self):
+        pass
+
     @abc.abstractmethod
     def render(self, **kwargs):
+        pass
+
+    @abc.abstractmethod
+    def render_nested(self, **kwargs):
         pass
 
 
@@ -68,7 +77,14 @@ class Placeholder(AbstractQueryElement):
     def dependencies(self):
         return tuple()
 
+    @property
+    def isinline(self):
+        return None
+
     def render(self, **kwargs):
+        raise Exception('Placeholders cannot be rendered.')
+
+    def render_nested(self, **kwargs):
         raise Exception('Placeholders cannot be rendered.')
 
 
@@ -86,16 +102,31 @@ class TableName(AbstractQueryElement):
         self.sql = name
 
     @property
+    def nest(self):
+        return False
+
+    @property
     def dependencies(self):
         return tuple()
 
     @property
     def isinline(self):
-        True
+        return True
 
     def render(self, **kwargs):
         # TODO: should a non-empty kwargs raise an exception ?
         return self.sql
+
+    render_nested = render
+
+
+class QueryTemplateFormatter(string.Formatter):
+
+    def get_value(self, key, args, kwds):
+        if isinstance(key, str):
+            return kwds.get(key, '{{{0}}}'.format(key))
+        else:
+            return string.Formatter.get_value(key, args, kwds)
 
 
 class QueryTemplate(AbstractQueryElement):
@@ -110,23 +141,31 @@ class QueryTemplate(AbstractQueryElement):
     parent nodes in the DAG.
     """
 
-    _sql_formatter = string.Formatter()
+    _sql_formatter = QueryTemplateFormatter()
 
-    def __init__(self, template,
-                 inline=False):
+    def __init__(self, template, inline=False):
         self.sql = template
         self._inline = inline
 
     @property
     def dependencies(self):
-        return tuple(x[1] for x in self._sql_formatter.parse(self.sql))
+        return tuple(x[1][3:]
+                     for x in self._sql_formatter.parse(self.sql)
+                     if x[1] is not None and x[1].startswith('qs.'))
 
     @property
     def isinline(self):
         return self._inline
 
     def render(self, **kwargs):
-        return '(%s)' % self._sql_formatter.format(self.sql, **kwargs)
+        namedargs = tuple(kwargs.items())
+        qs = collections.namedtuple('NamedArgs', tuple(x[0] for x in namedargs))(
+            *tuple(x[1] for x in namedargs)
+        )
+        return self._sql_formatter.format(self.sql, qs=qs)
+
+    def render_nested(self, **kwargs):
+        return '(%s)' % self.render(**kwargs)
 
 
 # TODO: use an existing graph library or just an overkill ?
@@ -249,6 +288,7 @@ class QuerySpace(object):
         new_nodes.update(kwargs)
         renders = dict()
         render_defs = []
+        n_notinline = 0
         for cur_name in self.iter_topological(keys=self.dependencies(name)):
             if cur_name in new_nodes:
                 assert isinstance(self[cur_name], Placeholder)
@@ -256,20 +296,21 @@ class QuerySpace(object):
             else:
                 cur_node = self[cur_name]
             if cur_node.isinline:
-                renders[cur_name] = cur_node.render(**renders)
+                renders[cur_name] = cur_node.render_nested(**renders)
             else:
+                n_notinline += 1
                 renders[cur_name] = cur_name
                 render_defs.append(
                     (cur_name,
                      cur_node.render(**renders)))
         if len(render_defs) == 0:
             return renders[name]
-        elif render_defs == 1:
-            return renders_defs[0][1]
+        elif (render_defs == 1 or n_notinline <= 1):
+            return render_defs[0][1]
         else:
             return os.linesep.join(
                 ('WITH',
-                 ', '.join('%s AS %s' % (k, v) for k, v in render_defs[:-1]),
+                 ', '.join('%s AS (%s)' % (k, v) for k, v in render_defs[:-1]),
                  render_defs[-1][1])
             )
 
