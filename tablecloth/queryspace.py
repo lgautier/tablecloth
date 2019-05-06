@@ -50,24 +50,37 @@ class AbstractQueryElement(metaclass=abc.ABCMeta):
     @property
     @abc.abstractmethod
     def dependencies(self):
+        """Sequence of dependency names for the element."""
         pass
 
     @property
     @abc.abstractmethod
     def isinline(self):
+        """Should the element be rendered 'inline'.
+
+        If false, the element will be rendered in a WITH statement,
+        to the extent possible."""
         pass
 
     @abc.abstractmethod
     def render(self, **kwargs):
+        """Render the query element when not inline."""
         pass
 
     @abc.abstractmethod
     def render_nested(self, **kwargs):
+        """Render the query element when inline."""
         pass
 
 
 class Placeholder(AbstractQueryElement):
     """A placeholder.
+
+    Placeholders are typically added to a query space an AbstractQueryElement
+    with dependencies not yet defined in the query space are added.
+
+    A Placeholder does not have dependencies by definition, as it represent
+    a query element not yet known to the QuerySpace.
     """
 
     def __init__(self):
@@ -159,7 +172,10 @@ class QueryTemplate(AbstractQueryElement):
 
     def render(self, **kwargs):
         namedargs = tuple(kwargs.items())
-        qs = collections.namedtuple('NamedArgs', tuple(x[0] for x in namedargs))(
+        qs = collections.namedtuple(
+            'NamedArgs',
+            tuple(x[0] for x in namedargs)
+        )(
             *tuple(x[1] for x in namedargs)
         )
         return self._sql_formatter.format(self.sql, qs=qs)
@@ -218,10 +234,19 @@ class QuerySpace(object):
         self._dag = DAG()
         for k, v in d.items():
             self[k] = v
+
+    def __add__(self, other):
+        assert isinstance(other, QuerySpace)
+        res = type(self)()
+        for k, v in self.items():
+            res[k] = v
+        for k, v in other.items():
+            res[k] = v
+        return res
         
     def __getitem__(self, name):
         return self._query_nodes[name]
-    
+
     def __setitem__(self, name, value):
         assert isinstance(value, AbstractQueryElement)
         if name in self and not isinstance(self[name], Placeholder):
@@ -229,7 +254,7 @@ class QuerySpace(object):
                 'Replacing other elements than placeholders is not yet implemented.'
             )
         if name in value.dependencies:
-            raise qs.CyclicDependencyError(
+            raise CyclicDependencyError(
                 '{} would depend on itself'.format(name)
             )
         cycles = []
@@ -237,7 +262,7 @@ class QuerySpace(object):
             if self.has_dependency(depname, name):
                 cycles.append(depname)
         if cycles:
-            raise qs.CyclicDependencyError(
+            raise CyclicDependencyError(
                 '{} has a cyclic dependency via ({})'.format(
                     name, ', '.join(cycles))
             )
@@ -266,7 +291,10 @@ class QuerySpace(object):
     def keys(self):
         return self._query_nodes.keys()
 
-    def has_dependency(self, dependency_name, name):
+    def items(self):
+        return self._query_nodes.items()
+
+    def has_dependency(self, name, dependency_name):
         """Determine if dependency_name is a transitive dependency of name."""
         parents = set([name])
         while parents:
@@ -279,6 +307,17 @@ class QuerySpace(object):
         return False
 
     def make(self, name, *args, **kwargs):
+        """
+        Make a query.
+
+        Args:
+        - name:  name (key) of the query to make
+        - d [optional]: a dict of names and associated query elements
+        - **kwargs: names and associated query elements
+        Returns:
+        An SQL query.
+        """
+
         assert name in self._query_nodes
         new_nodes = {}
         if len(args) == 1:
@@ -286,6 +325,16 @@ class QuerySpace(object):
         elif len(args) > 1:
             raise ValueError('At most two unnamed parameters can be specified.')
         new_nodes.update(kwargs)
+
+        notplaceholders = []
+        for k in new_nodes.keys():
+            if not isinstance(self[k], Placeholder):
+                notplaceholders.append(k)
+        if notplaceholders:
+            raise ValueError('Cannot assign values outside of placeholders (%s). '
+                             'Consider building a derivative graph.' %
+                             ', '.join(notplaceholders))
+
         renders = dict()
         render_defs = []
         n_notinline = 0
@@ -300,6 +349,8 @@ class QuerySpace(object):
             else:
                 n_notinline += 1
                 renders[cur_name] = cur_name
+                if isinstance(cur_node, Placeholder):
+                    raise NameNotFoundError(cur_name)
                 render_defs.append(
                     (cur_name,
                      cur_node.render(**renders)))

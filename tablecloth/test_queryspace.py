@@ -56,7 +56,6 @@ class TestQuerySpace:
         FROM source_table
         """)
 
-
     def test_name_not_found(self):
         space = qs.QuerySpace()
 
@@ -67,7 +66,6 @@ class TestQuerySpace:
 
         with pytest.raises(qs.NameNotFoundError):
             assert space.make('my_query', {})
-
 
     def test_multiple_nodes(self):
         space = qs.QuerySpace()
@@ -84,12 +82,15 @@ class TestQuerySpace:
           query2 AS (SELECT * FROM query1)
         SELECT * FROM query2""")
 
-        query = space.make(
-            'query3', {'query2': qs.TableName('source_table')})
+    def test_notplaceholder(self):
+        space = qs.QuerySpace()
+        space['query2'] = qs.QueryTemplate('SELECT * FROM {qs.query1}')
+        space['query1'] = qs.QueryTemplate('SELECT * FROM {qs.my_table}')
+        space['query3'] = qs.QueryTemplate('SELECT * FROM {qs.query2}')
 
-        assert homogenize(query) == homogenize("""
-        SELECT * FROM source_table""")
-
+        with pytest.raises(ValueError):
+            query = space.make(
+                'query3', {'query2': qs.TableName('source_table')})
 
     def test_template_parameters(self):
         space = qs.QuerySpace()
@@ -117,13 +118,32 @@ class TestQuerySpace:
             'query4', {'my_table': qs.TableName('source_table')}
         )
 
-        assert homogenize(query) == homogenize("""
+        assert (homogenize(query) == homogenize("""
         WITH
           query1 AS (SELECT * FROM source_table),
           query3 AS (SELECT * FROM query1),
           query2 AS (SELECT * FROM query1)
-        SELECT * FROM query2 JOIN query3""")
+        SELECT * FROM query2 JOIN query3""") or
+                homogenize(query) == homogenize("""
+        WITH
+          query1 AS (SELECT * FROM source_table),
+          query2 AS (SELECT * FROM query1),
+          query3 AS (SELECT * FROM query1)
+        SELECT * FROM query2 JOIN query3"""))
 
+    def test_has_dependency(self):
+        space = qs.QuerySpace()
+        # query1 <--- query2
+        space['query1'] = qs.QueryTemplate('SELECT * FROM {qs.query2}')
+        # query2 <--- query3
+        space['query2'] = qs.QueryTemplate('SELECT * FROM {qs.query3}')
+        
+        assert space.has_dependency('query1', 'query2')
+        assert not space.has_dependency('query2', 'query1')
+        assert space.has_dependency('query2', 'query3')
+        assert not space.has_dependency('query3', 'query2')
+        assert space.has_dependency('query1', 'query3')
+        assert not space.has_dependency('query3', 'query1')
 
     def test_detect_space_cycles(self):
         space = qs.QuerySpace()
