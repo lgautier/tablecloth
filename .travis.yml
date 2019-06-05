@@ -2,8 +2,11 @@ language: python
 python:
   - "3.5"
   - "3.6"
+before_install:
+  - pip install -U -r requirements.txt
 install:
-  - pip install -r requirements.txt
   - python setup.py install
 script:
-  - pytest tablecloth
+  - pytest --cov=tablecloth tablecloth
+after_success:
+  - codecov
