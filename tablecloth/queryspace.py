@@ -11,6 +11,7 @@ Sample usage:
         'query3', {'my_table': 'source_table'})
 """
 
+import abc
 import re
 
 # Finds refrence names wrapped in {{*}} in a query.
@@ -22,8 +23,17 @@ class NameNotFoundError(Exception):
     pass
 
 
+class QueryElement(abc.ABC):
+
+    @property
+    @abc.abstractmethod
+    def dependencies(self):
+        """Tuple of dependency names for the element."""
+        pass
+
+
 class CyclicDependencyError(Exception):
-    """Exception when a new QueryNode introduces a circular dependency."""
+    """Exception when a new QueryElement introduces a circular dependency."""
     pass
 
 
@@ -32,17 +42,17 @@ class QueryBuilder(object):
 
     The lifetime of this object is from when QuerySpace.compile() is called
     to when the query is returned. It tracks the with statements for this
-    single query and passes each QueryNode the key/value pairs it needs.
+    single query and passes each QueryElement the key/value pairs it needs.
 
-    When a QueryNode calls get_inline_name(), the QueryBuilder determines
+    When a QueryElement calls get_inline_name(), the QueryBuilder determines
     if this reference should come from the TableSource or from another
-    QueryNode, makes sure there's a with statement as necessary, then returns
+    QueryElement, makes sure there's a with statement as necessary, then returns
     the inline name.
 
-    In cases where the reference is to another QueryNode, the QueryBuilder
+    In cases where the reference is to another QueryElement, the QueryBuilder
     gets the with statement by calling compile() on this query node, passing
     itself as the QueryBuilder so that it can capture any with statements
-    that this second QueryNode needs.
+    that this second QueryElement needs.
     """
 
     def __init__(self, table_map, space, template_parameters):
@@ -80,7 +90,7 @@ class QueryBuilder(object):
                     reference_name, from_query))
 
 
-class QueryNode(object):
+class QueryTemplate(QueryElement):
     """A single node in a QuerySpace.
 
     The node is responsible for identifying its dependencies and
@@ -98,18 +108,19 @@ class QueryNode(object):
         self._query_text = query_text
         dependency_list_dups = re.findall(DEPENDENCY_REGEX, query_text)
         # Remove duplicates will preserving a canonical order.
-        self._dependency_list = []
+        dependency_list = []
         for d in dependency_list_dups:
-            if d not in self._dependency_list:
-                self._dependency_list.append(d)
+            if d not in dependency_list:
+                dependency_list.append(d)
+        self._dependencies = tuple(dependencies)
 
     @property
-    def dependency_list(self):
-        return self._dependency_list
+    def dependencies(self):
+        return self._dependencies
 
     def compile(self, query_builder):
         substitutions = {}
-        for reference_name in self.dependency_list:
+        for reference_name in self.dependencies:
             inline_name = query_builder.get_inline_name(
                 reference_name, self._name)
             substitutions[reference_name] = inline_name
@@ -124,9 +135,9 @@ class QuerySpace(object):
     def __init__(self):
         self._query_nodes = {}
 
-    def __setitem__(self, reference_name, query_text):
-        new_node = QueryNode(reference_name, query_text)
-        for d in new_node.dependency_list:
+    def __setitem__(self, reference_name, query_element):
+        assert isinstance(query_element, QueryElement)
+        for d in new_node.dependencies:
             if self.find_in_dependencies(d, reference_name):
                 raise CyclicDependencyError(
                     '{} has a cyclic dependency via {}'.format(
@@ -150,7 +161,7 @@ class QuerySpace(object):
             if next_node == reference_name:
                 return True
             if next_node in self.available_nodes:
-                queue += self.query_node(next_node).dependency_list
+                queue += self.query_node(next_node).dependencies
         return False
 
     def compile(self, target_name, table_map, template_parameters=None):
