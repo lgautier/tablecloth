@@ -7,6 +7,6 @@ before_install:
 install:
   - python setup.py install
 script:
-  - pytest --cov=tablecloth tablecloth
+  - pytest --cov=tablecloth tablecloth/test*.py
 after_success:
   - codecov
