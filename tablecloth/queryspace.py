@@ -75,7 +75,7 @@ class QueryBuilder(object):
         if reference_name in self._visited_nodes:
             return self._visited_nodes[reference_name]
         elif reference_name in self._table_map:
-            inline = self._table_map[reference_name]
+            inline = self._table_map[reference_name].render()
             self._visited_nodes[reference_name] = inline
             return inline
         elif reference_name in self._space.available_nodes:
@@ -90,8 +90,40 @@ class QueryBuilder(object):
                     reference_name, from_query))
 
 
+class TableName(QueryElement):
+    """A table name (in a Queryspace).
+
+    The name represents the name of the table as known by an SQL interpreter
+    when the SQL is evaluated.
+    
+    This class is meant to indicate to a QuerySpace instance that a key
+    (node in the subquery dependcy graph) does not have any parent in the DAG.
+    """
+
+    def __init__(self, name):
+        self.sql = name
+
+    @property
+    def nest(self):
+        return False
+
+    @property
+    def dependencies(self):
+        return tuple()
+
+    @property
+    def isinline(self):
+        return True
+
+    def render(self, **kwargs):
+        # TODO: should a non-empty kwargs raise an exception ?
+        return self.sql
+
+    render_nested = render
+
+
 class QueryTemplate(QueryElement):
-    """A single node in a QuerySpace.
+    """A query template (in a Queryspace).
 
     The node is responsible for identifying its dependencies and
     substituting inline names (either source tables or query nodes)
@@ -165,6 +197,10 @@ class QuerySpace(object):
         return False
 
     def compile(self, target_name, table_map, template_parameters=None):
+        for k, v in table_map.items():
+            if not isinstance(v, TableName):
+                raise TypeError(f'{k} is not an instance of type TableName.')
+
         query_builder = QueryBuilder(table_map, self, template_parameters)
         main_query = self.query_node(target_name).compile(query_builder)
 
