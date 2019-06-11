@@ -199,7 +199,9 @@ class QuerySpace(object):
     def compile(self, target_name, table_map, template_parameters=None):
         for k, v in table_map.items():
             if not isinstance(v, TableName):
-                raise TypeError(f'{k} is not an instance of type TableName.')
+                raise TypeError(
+                    '{k} is not an instance of type TableName.'.format(k=k)
+                )
 
         query_builder = QueryBuilder(table_map, self, template_parameters)
         main_query = self.query_node(target_name).compile(query_builder)
