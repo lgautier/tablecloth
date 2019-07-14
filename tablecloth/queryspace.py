@@ -112,7 +112,7 @@ class QueryTemplate(QueryElement):
         for d in dependency_list_dups:
             if d not in dependency_list:
                 dependency_list.append(d)
-        self._dependencies = tuple(dependencies)
+        self._dependencies = tuple(dependency_list)
 
     @property
     def dependencies(self):
@@ -137,12 +137,12 @@ class QuerySpace(object):
 
     def __setitem__(self, reference_name, query_element):
         assert isinstance(query_element, QueryElement)
-        for d in new_node.dependencies:
+        for d in query_element.dependencies:
             if self.find_in_dependencies(d, reference_name):
                 raise CyclicDependencyError(
                     '{} has a cyclic dependency via {}'.format(
                         reference_name, d))
-        self._query_nodes[reference_name] = new_node
+        self._query_nodes[reference_name] = query_element
 
     @property
     def available_nodes(self):
