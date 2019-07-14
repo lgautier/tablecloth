@@ -1,7 +1,7 @@
 """Unit tests for queryspace.py"""
 
-from queryspace import QuerySpace, QueryTemplate
-from queryspace import NameNotFoundError, CyclicDependencyError
+from tablecloth.queryspace import QuerySpace, QueryTemplate
+from tablecloth.queryspace import NameNotFoundError, CyclicDependencyError
 import pytest
 
 
