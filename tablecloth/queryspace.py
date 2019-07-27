@@ -204,9 +204,6 @@ class QuerySpace(object):
 
     def __init__(self, d={}):
         self._query_nodes = {}
-        self._dag = DAG()
-        for k, v in d.items():
-            self[k] = v
 
     def __setitem__(self, reference_name, query_element):
         assert isinstance(query_element, QueryElement)
