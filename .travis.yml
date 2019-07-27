@@ -8,7 +8,9 @@ install:
   - python setup.py install
 script:
   - |
-    pytest --cov=tablecloth.queryspace \
+    pytest \
+    --cov=tablecloth.queryspace \
+    --code=tablecloth.graph \
     tablecloth/test*.py
 after_success:
   - codecov
