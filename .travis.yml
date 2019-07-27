@@ -10,7 +10,7 @@ script:
   - |
     pytest \
     --cov=tablecloth.queryspace \
-    --code=tablecloth.graph \
+    --cov=tablecloth.graph \
     tablecloth/test*.py
 after_success:
   - codecov
