@@ -13,6 +13,8 @@ Sample usage:
 
 import abc
 import re
+from . import graph
+
 
 # Finds refrence names wrapped in {{*}} in a query.
 DEPENDENCY_REGEX = re.compile('{{(.*?)}}')
@@ -43,10 +45,6 @@ class QueryElement(abc.ABC):
         """"Compile" the SQL query for that element."""
         pass
     
-class CyclicDependencyError(Exception):
-    """Exception when a new QueryElement introduces a circular dependency."""
-    pass
-
 
 class QueryBuilder(object):
     """Tracks the dependencies and with statements to build a single query.
@@ -99,6 +97,29 @@ class QueryBuilder(object):
             raise NameNotFoundError(
                 'No such query or table {}, referenced in query {}.'.format(
                     reference_name, from_query))
+
+
+class Placeholder(QueryElement):
+    """A placeholder.
+
+    Placeholders are typically added to a query space an AbstractQueryElement
+    with dependencies not yet defined in the query space are added.
+    A Placeholder does not have dependencies by definition, as it represent
+    a query element not yet known to the QuerySpace.
+    """
+
+    issubquery = None
+
+    def __init__(self):
+        pass
+
+    @property
+    def dependencies(self):
+        # TODO: May be this should raise an exception instead?
+        return None
+
+    def compile(self, querybuilder):
+        raise Exception('Placeholders cannot be rendered.')
 
 
 class TableName(QueryElement):
@@ -179,7 +200,7 @@ class QueryTemplate(QueryElement):
 
 
 class QuerySpace(object):
-    """A compute space of subqueries."""
+    """A "namespace" of SQL queries."""
 
     def __init__(self):
         self._query_nodes = {}
@@ -188,7 +209,7 @@ class QuerySpace(object):
         assert isinstance(query_element, QueryElement)
         for d in query_element.dependencies:
             if self.find_in_dependencies(d, reference_name):
-                raise CyclicDependencyError(
+                raise graph.CyclicDependencyError(
                     '{} has a cyclic dependency via {}'.format(
                         reference_name, d))
         self._query_nodes[reference_name] = query_element

@@ -1,5 +1,6 @@
 """Unit tests for queryspace.py"""
 
+from tablecloth import graph
 from tablecloth import queryspace
 import pytest
 
@@ -121,6 +122,6 @@ def test_detect_space_cycles():
     space['query2'] = queryspace.QueryTemplate(
         'query2', 'SELECT * FROM {{query3}}')
 
-    with pytest.raises(queryspace.CyclicDependencyError):
+    with pytest.raises(graph.CyclicDependencyError):
         space['query3'] = queryspace.QueryTemplate(
             'query3', 'SELECT * FROM {{query1}}')
