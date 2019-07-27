@@ -24,14 +24,25 @@ class NameNotFoundError(Exception):
 
 
 class QueryElement(abc.ABC):
+    """This abstract class acts as an interface for query elements."""
 
     @property
     @abc.abstractmethod
     def dependencies(self):
-        """Tuple of dependency names for the element."""
+        """Tuple of direct dependency names for the element."""
         pass
 
+    @property
+    @abc.abstractmethod
+    def issubquery(self):
+        """Is the query element a itself an SQL query."""
+        pass
 
+    @abc.abstractmethod
+    def compile(self, querybuilder):
+        """"Compile" the SQL query for that element."""
+        pass
+    
 class CyclicDependencyError(Exception):
     """Exception when a new QueryElement introduces a circular dependency."""
     pass
@@ -75,7 +86,7 @@ class QueryBuilder(object):
         if reference_name in self._visited_nodes:
             return self._visited_nodes[reference_name]
         elif reference_name in self._table_map:
-            inline = self._table_map[reference_name].render()
+            inline = self._table_map[reference_name].compile(self)
             self._visited_nodes[reference_name] = inline
             return inline
         elif reference_name in self._space.available_nodes:
@@ -97,29 +108,32 @@ class TableName(QueryElement):
     when the SQL is evaluated.
     
     This class is meant to indicate to a QuerySpace instance that a key
-    (node in the subquery dependcy graph) does not have any parent in the DAG.
+    (node in the subquery dependcy graph) is simply a table name.
     """
 
+    issubquery = False
+
     def __init__(self, name):
-        self.sql = name
+        self.name = name
 
     @property
-    def nest(self):
-        return False
+    def name(self):
+        return self.__name
+
+    @name.setter
+    def name(self, value):
+        # TODO: check that value is a syntactically valid table name.
+        #    This will facilitate the parametrization of query of the table
+        #    name while preventing SQL injection.
+        self.__name = value
 
     @property
     def dependencies(self):
+        # A table always return a empty sequence.
         return tuple()
 
-    @property
-    def isinline(self):
-        return True
-
-    def render(self, **kwargs):
-        # TODO: should a non-empty kwargs raise an exception ?
-        return self.sql
-
-    render_nested = render
+    def compile(self, querybuilder):
+        return self.name
 
 
 class QueryTemplate(QueryElement):
@@ -135,8 +149,11 @@ class QueryTemplate(QueryElement):
     for its dependencies and to track the necessary with statements.
     """
 
+    issubquery = True
+
     def __init__(self, name, query_text):
         self._name = name
+        assert query_text.lstrip().upper().startswith('SELECT')
         self._query_text = query_text
         dependency_list_dups = re.findall(DEPENDENCY_REGEX, query_text)
         # Remove duplicates will preserving a canonical order.
