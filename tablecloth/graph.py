@@ -39,6 +39,16 @@ class DAG(object):
         self._reverse[key_b].remove(key_a)
         self._forward[key_a].remove(key_b)
 
+    def dependencies(self, key):
+        res = set()
+        queue = set(self.nodes_to(key))
+        while queue:
+            k = queue.pop()
+            res.add(k)
+            for x in self.nodes_to(k):
+                queue.add(x)
+        return res
+
     def has_dependency(self, key, dependency_key):
         """Determine if dependency_key is a transitive dependency of key."""
         parents = set([key])
@@ -77,11 +87,12 @@ class DAG(object):
                 raise ValueError('No node {}'.format(k))
             res._nodes.add(k)
             for k_b in self.nodes_from(k):
-                if k_a in keys:
+                if k_b in keys:
                     res.add_edge(k, k_b)
             for k_a in self.nodes_to(k):
                 if k_a in keys:
                     res.add_edge(k_a, k)
+        return res
 
     def keys_topological(self):
         """Iterate over keys in a topological order.

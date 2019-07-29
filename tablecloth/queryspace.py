@@ -12,16 +12,20 @@ Sample usage:
 """
 
 import abc
+import collections
+import os
 import re
+import string
 from . import graph
-
-
-# Finds refrence names wrapped in {{*}} in a query.
-DEPENDENCY_REGEX = re.compile('{{(.*?)}}')
 
 
 class NameNotFoundError(Exception):
     """Exception when a requested QueryNode is not in the query space."""
+    pass
+
+
+class UnspecifiedPlaceholder(Exception):
+    """Exception when building an SQL query cannot be completed because of remaining placeholder."""
     pass
 
 
@@ -37,66 +41,15 @@ class QueryElement(abc.ABC):
     @property
     @abc.abstractmethod
     def issubquery(self):
-        """Is the query element a itself an SQL query."""
+        """Is the query element a itself an SQL query.
+
+        This is used to decide whether to place the element in a WITH statement."""
         pass
 
     @abc.abstractmethod
-    def compile(self, querybuilder):
-        """"Compile" the SQL query for that element."""
+    def render(self, **kwargs):
+        """"Render the SQL for that element."""
         pass
-    
-
-class QueryBuilder(object):
-    """Tracks the dependencies and with statements to build a single query.
-
-    The lifetime of this object is from when QuerySpace.compile() is called
-    to when the query is returned. It tracks the with statements for this
-    single query and passes each QueryElement the key/value pairs it needs.
-
-    When a QueryElement calls get_inline_name(), the QueryBuilder determines
-    if this reference should come from the TableSource or from another
-    QueryElement, makes sure there's a with statement as necessary, then returns
-    the inline name.
-
-    In cases where the reference is to another QueryElement, the QueryBuilder
-    gets the with statement by calling compile() on this query node, passing
-    itself as the QueryBuilder so that it can capture any with statements
-    that this second QueryElement needs.
-    """
-
-    def __init__(self, table_map, space, template_parameters):
-        self._table_map = table_map
-        self._space = space
-        self._template_parameters = template_parameters or {}
-        self._with_list = []
-        # Maps inline name to reference name.
-        self._visited_nodes = {}
-
-    @property
-    def with_list(self):
-        return self._with_list
-
-    @property
-    def template_parameters(self):
-        return self._template_parameters
-
-    def get_inline_name(self, reference_name, from_query):
-        if reference_name in self._visited_nodes:
-            return self._visited_nodes[reference_name]
-        elif reference_name in self._table_map:
-            inline = self._table_map[reference_name].compile(self)
-            self._visited_nodes[reference_name] = inline
-            return inline
-        elif reference_name in self._space.available_nodes:
-            self._visited_nodes[reference_name] = reference_name
-            node = self._space.query_node(reference_name)
-            with_text = node.compile(self)
-            self._with_list.append((reference_name, with_text))
-            return reference_name
-        else:
-            raise NameNotFoundError(
-                'No such query or table {}, referenced in query {}.'.format(
-                    reference_name, from_query))
 
 
 class Placeholder(QueryElement):
@@ -118,7 +71,7 @@ class Placeholder(QueryElement):
         # TODO: May be this should raise an exception instead?
         return None
 
-    def compile(self, querybuilder):
+    def render(self, **kwargs):
         raise Exception('Placeholders cannot be rendered.')
 
 
@@ -153,11 +106,21 @@ class TableName(QueryElement):
         # A table always return a empty sequence.
         return tuple()
 
-    def compile(self, querybuilder):
+    def render(self, **kwargs):
         return self.name
 
 
+class QueryTemplateFormatter(string.Formatter):
+
+    def get_value(self, key, args, kwds):
+        if isinstance(key, str):
+            return kwds.get(key, '{{{0}}}'.format(key))
+        else:
+            return string.Formatter.get_value(key, args, kwds)
+
+
 class QueryTemplate(QueryElement):
+
     """A query template (in a Queryspace).
 
     The node is responsible for identifying its dependencies and
@@ -171,82 +134,214 @@ class QueryTemplate(QueryElement):
     """
 
     issubquery = True
+    _sql_formatter = QueryTemplateFormatter()
 
-    def __init__(self, name, query_text):
-        self._name = name
-        assert query_text.lstrip().upper().startswith('SELECT')
-        self._query_text = query_text
-        dependency_list_dups = re.findall(DEPENDENCY_REGEX, query_text)
-        # Remove duplicates will preserving a canonical order.
-        dependency_list = []
-        for d in dependency_list_dups:
-            if d not in dependency_list:
-                dependency_list.append(d)
-        self._dependencies = tuple(dependency_list)
+    def __init__(self, template):
+        self._template = template
+        self._dependencies = self._extract_dependencies()
+
+    def _extract_dependencies(self):
+         return tuple(
+             x[1][3:]
+             for x in self._sql_formatter.parse(self._template)
+             if x[1] is not None and x[1].startswith('qs.'))
 
     @property
     def dependencies(self):
         return self._dependencies
 
-    def compile(self, query_builder):
-        substitutions = {}
-        for reference_name in self.dependencies:
-            inline_name = query_builder.get_inline_name(
-                reference_name, self._name)
-            substitutions[reference_name] = inline_name
-        return (self._query_text
-                    .format(**query_builder.template_parameters)
-                    .format(**substitutions))
+    def render(self, **kwargs):
+        namedargs = tuple(kwargs.items())
+        qs = collections.namedtuple(
+            'NamedArgs',
+            tuple(x[0] for x in namedargs)
+        )(
+            *tuple(x[1] for x in namedargs)
+        )
+        
+        return self._sql_formatter.format(self._template, qs=qs)
 
 
 class QuerySpace(object):
-    """A "namespace" of SQL queries."""
+    """A "namespace" of SQL queries.
+
+    A namespace of SQL queries can be thought of as a convenience wrapper
+    over a dependency graph of names/keys/labels and the QueryElement objects
+    associated with those names/keys/labels.
+
+    For example:
+    >>> qs = QuerySpace()
+    >>> sql = 'SELECT * FROM {vehicles} WHERE wheels=4'
+    >>> qs['cars'] = QueryTemplate(sql)
+
+
+    The role of a QuerySpace is to keep track of dependencies between all
+    QueryElement objects it knows about using the name/key/label they are
+    registered under, and the name of dependencies reported by the
+    QueryElement itself. Dependencies the QuerySpace does not know about yet
+    will be defined as Placeholder instances in the dependency graph.
+    """
 
     def __init__(self, d={}):
         self._query_nodes = {}
+        self._dag = graph.DAG()
+        for k, v in d.items():
+            self[k] = v
 
-    def __setitem__(self, reference_name, query_element):
-        assert isinstance(query_element, QueryElement)
-        for d in query_element.dependencies:
-            if self.find_in_dependencies(d, reference_name):
+    def __getitem__(self, key):
+        if key not in self._query_nodes:
+            raise NameNotFoundError(key)
+        return self._query_nodes[key]
+
+    def _setitem_replace(self, key, value):
+        if not isinstance(self[key], Placeholder):
+            # Allowing the replacement of non-placeholder elements is not
+            # always going to be desirable. An example of use-case would be to have
+            # "parametric" namespaces in which only placeholders can be replaced.
+            raise ValueError(
+                'Only Placeholder elements can be replaced.'
+            )
+        self._query_nodes[key] = value
+
+    def _setitem_missing_dependency(self, key):
+        """What happens when a QueryElement lists an unknown dependency.
+
+        This method allows an easy customization of the behavior when an added
+        QueryElement lists a dependency not yet known to the QuerySpace."""
+        self._query_nodes[key] = Placeholder()
+
+    def __setitem__(self, name, value):
+        if not isinstance(value, QueryElement):
+            raise TypeError('Value must be a QueryElement.')
+        
+        if value.dependencies:
+            if name in value.dependencies:
                 raise graph.CyclicDependencyError(
-                    '{} has a cyclic dependency via {}'.format(
-                        reference_name, d))
-        self._query_nodes[reference_name] = query_element
-
-    @property
-    def available_nodes(self):
-        return set(self._query_nodes.keys())
-
-    def query_node(self, reference_name):
-        if reference_name not in self._query_nodes:
-            raise NameNotFoundError(reference_name)
-        return self._query_nodes[reference_name]
-
-    def find_in_dependencies(self, node_name, reference_name):
-        """Determine if reference_name is a transitive dependency."""
-        queue = [node_name]
-        while queue:
-            next_node = queue.pop(0)
-            if next_node == reference_name:
-                return True
-            if next_node in self.available_nodes:
-                queue += self.query_node(next_node).dependencies
-        return False
-
-    def compile(self, target_name, table_map, template_parameters=None):
-        for k, v in table_map.items():
-            if not isinstance(v, TableName):
-                raise TypeError(
-                    '{k} is not an instance of type TableName.'.format(k=k)
+                    '{} would depend on itself'.format(name)
                 )
 
-        query_builder = QueryBuilder(table_map, self, template_parameters)
-        main_query = self.query_node(target_name).compile(query_builder)
+        if name in self:
+            self._setitem_replace(name, value)
+        else:
+            self._query_nodes[name] = value
 
-        query = ''
-        if query_builder.with_list:
-            query = 'WITH {}\n\n'.format(',\n'.join(
-                '{} AS (\n{})'.format(name, text)
-                for name, text in query_builder.with_list))
-        return query + main_query
+        if value.dependencies:
+            cycles = []
+            for d in value.dependencies:
+                if d not in self._query_nodes:
+                    self._setitem_missing_dependency(d)
+                try:
+                    self._dag.add_edge(d, name)
+                except graph.CyclicDependencyError:
+                    cycles.append(d)
+            if cycles:
+                raise graph.CyclicDependencyError(
+                    '{} has a cyclic dependency via ({})'.format(
+                        name, ', '.join(cycles))
+                )
+
+
+    def __iter__(self):
+        return self.keys()
+
+    def __contains__(self, key):
+        return key in self._query_nodes
+
+    def keys(self):
+        return self._query_nodes.keys()
+
+    def items(self):
+        return self._query_nodes.items()
+
+    def has_dependency(self, name, dependency_name):
+        """Determine if dependency_name is a transitive dependency of name."""
+        parents = set([name])
+        while parents:
+            cur_name = parents.pop()
+            if cur_name == dependency_name:
+                return True
+            if cur_name in self._query_nodes:
+                for next_name in self[cur_name].dependencies:
+                    parents.add(next_name)
+        return False
+
+    def _make_check(self, key):
+        """Make any relevant check for a given key when building an SQL query.
+
+        This method allows an easy customization of the behavior, for example
+        if the partial rendering of queries, that if the rendering of SQL queries
+        that are templates, is wanted."""
+        if isinstance(self[key], Placeholder):
+            raise UnspecifiedPlaceholder(key)
+
+    def make(self, name, *args, **kwargs):
+        """
+        Make a query.
+
+        >>> qs = QuerySpace()
+        >>> sql = 'SELECT * FROM {vehicles} WHERE wheels=4'
+        >>> qs['cars'] = QueryTemplate(sql)
+        >>> sql = qs.make('cars')  # UnspecifiedPlaceholder
+        >>> qs['vehicles'] = TableName('vehicles_2019')
+        >>> sql = qs.make('cars')
+
+        Args:
+        - name:  name (key) of the query to make
+        - d [optional]: a dict of names and associated query elements
+        - **kwargs: names and associated query elements
+        Returns:
+        An SQL query.
+        """
+
+        assert name in self._query_nodes
+        new_nodes = {}
+        if len(args) == 1:
+            new_nodes.update(args[0])
+        elif len(args) > 1:
+            raise ValueError('At most two unnamed parameters can be specified.')
+        new_nodes.update(kwargs)
+
+        qspace = type(self)(d = {name: self[name]})
+        queue = set(d for d in qspace[name].dependencies if not isinstance(d, Placeholder))
+        while queue:
+            k = queue.pop()
+            n = new_nodes.get(k, self[k])
+            if k not in qspace or isinstance(qspace[k], Placeholder):
+                qspace[k] = n
+            for d in qspace._dag.nodes_to(k):
+                queue.add(d)
+        renders = dict()
+        render_defs = []
+        n_notinline = 0
+        for cur_key in qspace._dag.keys_topological():
+            qspace._make_check(cur_key)
+            cur_node= qspace[cur_key]
+            if cur_node.issubquery:
+                # QueryTemplates that are subqueries will be rendered
+                # using a WITH statement.
+                n_notinline += 1
+                renders[cur_key] = cur_key
+                render_defs.append(
+                    (cur_key,
+                     cur_node.render(**renders)))
+            else:
+                renders[cur_key] = cur_node.render(**renders)
+        if len(render_defs) == 0:
+            return renders[name]
+        elif (render_defs == 1 or n_notinline <= 1):
+            return render_defs[0][1]
+        else:
+            return os.linesep.join(
+                ('WITH',
+                 ', '.join('%s AS (%s)' % (k, v) for k, v in render_defs[:-1]),
+                 render_defs[-1][1])
+            )
+
+class ModifiableQuerySpace(QuerySpace):
+
+    def _setitem_replace(self, key, value):
+        if self._query_nodes[key].dependencies:
+            for d in self._query_nodes[key].dependencies:
+                self._dag.remove_edge(d, key)
+
+        self._query_nodes[key] = value
