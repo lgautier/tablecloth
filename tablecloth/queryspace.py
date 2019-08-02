@@ -119,41 +119,6 @@ class QueryTemplateFormatter(string.Formatter):
             return string.Formatter.get_value(key, args, kwds)
 
 
-class TableName(QueryElement):
-    """A table name (in a Queryspace).
-
-    The name represents the name of the table as known by an SQL interpreter
-    when the SQL is evaluated.
-    
-    This class is meant to indicate to a QuerySpace instance that a key
-    (node in the subquery dependcy graph) is simply a table name.
-    """
-
-    issubquery = False
-
-    def __init__(self, name):
-        self.name = name
-
-    @property
-    def name(self):
-        return self.__name
-
-    @name.setter
-    def name(self, value):
-        # TODO: check that value is a syntactically valid table name.
-        #    This will facilitate the parametrization of query of the table
-        #    name while preventing SQL injection.
-        self.__name = value
-
-    @property
-    def dependencies(self):
-        # A table always return a empty sequence.
-        return tuple()
-
-    def compile(self, querybuilder):
-        return self.name
-
-
 class QueryTemplate(QueryElement):
     """A query template (in a Queryspace).
 
