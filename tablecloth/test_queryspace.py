@@ -28,7 +28,8 @@ def test_make_single_node():
     # Fail if not a tablename object.
     with pytest.raises(TypeError):
         query = space.make(
-        'my_query', my_table='source_table')
+            'my_query', my_table='source_table'
+        )
 
     query = space.make(
         'my_query',

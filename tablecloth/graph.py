@@ -121,4 +121,3 @@ class DAG(object):
                     without_dep.add(m)
         if dag.n_edges:
             raise CyclicDependencyError()
-

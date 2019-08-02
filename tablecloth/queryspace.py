@@ -25,7 +25,8 @@ class NameNotFoundError(Exception):
 
 
 class UnspecifiedPlaceholder(Exception):
-    """Exception when building an SQL query cannot be completed because of remaining placeholder."""
+    """Exception when building an SQL query cannot be completed because
+    of remaining placeholder."""
     pass
 
 
@@ -43,7 +44,8 @@ class QueryElement(abc.ABC):
     def issubquery(self):
         """Is the query element a itself an SQL query.
 
-        This is used to decide whether to place the element in a WITH statement."""
+        This is used to decide whether to place the element in a WITH
+        statement."""
         pass
 
     @abc.abstractmethod
@@ -78,9 +80,9 @@ class Placeholder(QueryElement):
 class TableName(QueryElement):
     """A table name (in a Queryspace).
 
-    The name represents the name of the table as known by an SQL interpreter
-    when the SQL is evaluated.
-    
+    The name represents the name of the table as known by an SQL
+    interpreter when the SQL is evaluated.
+
     This class is meant to indicate to a QuerySpace instance that a key
     (node in the subquery dependcy graph) is simply a table name.
     """
@@ -140,10 +142,10 @@ class QueryTemplate(QueryElement):
         self._dependencies = self._extract_dependencies()
 
     def _extract_dependencies(self):
-         return tuple(
-             x[1][3:]
-             for x in self._sql_formatter.parse(self._template)
-             if x[1] is not None and x[1].startswith('qs.'))
+        return tuple(
+            x[1][3:]
+            for x in self._sql_formatter.parse(self._template)
+            if x[1] is not None and x[1].startswith('qs.'))
 
     @property
     def dependencies(self):
@@ -157,7 +159,7 @@ class QueryTemplate(QueryElement):
         )(
             *tuple(x[1] for x in namedargs)
         )
-        
+
         return self._sql_formatter.format(self._template, qs=qs)
 
 
@@ -195,8 +197,9 @@ class QuerySpace(object):
     def _setitem_replace(self, key, value):
         if not isinstance(self[key], Placeholder):
             # Allowing the replacement of non-placeholder elements is not
-            # always going to be desirable. An example of use-case would be to have
-            # "parametric" namespaces in which only placeholders can be replaced.
+            # always going to be desirable. An example of use-case would be
+            # to have "parametric" namespaces in which only placeholders can
+            # be replaced.
             raise ValueError(
                 'Only Placeholder elements can be replaced.'
             )
@@ -212,7 +215,7 @@ class QuerySpace(object):
     def __setitem__(self, name, value):
         if not isinstance(value, QueryElement):
             raise TypeError('Value must be a QueryElement.')
-        
+
         if value.dependencies:
             if name in value.dependencies:
                 raise graph.CyclicDependencyError(
@@ -238,7 +241,6 @@ class QuerySpace(object):
                     '{} has a cyclic dependency via ({})'.format(
                         name, ', '.join(cycles))
                 )
-
 
     def __iter__(self):
         return self.keys()
@@ -268,8 +270,8 @@ class QuerySpace(object):
         """Make any relevant check for a given key when building an SQL query.
 
         This method allows an easy customization of the behavior, for example
-        if the partial rendering of queries, that if the rendering of SQL queries
-        that are templates, is wanted."""
+        if the partial rendering of queries, that if the rendering of SQL
+        queries that are templates, is wanted."""
         if isinstance(self[key], Placeholder):
             raise UnspecifiedPlaceholder(key)
 
@@ -297,11 +299,14 @@ class QuerySpace(object):
         if len(args) == 1:
             new_nodes.update(args[0])
         elif len(args) > 1:
-            raise ValueError('At most two unnamed parameters can be specified.')
+            raise ValueError(
+                'At most two unnamed parameters can be specified.'
+            )
         new_nodes.update(kwargs)
 
-        qspace = type(self)(d = {name: self[name]})
-        queue = set(d for d in qspace[name].dependencies if not isinstance(d, Placeholder))
+        qspace = type(self)(d={name: self[name]})
+        queue = set(d for d in qspace[name].dependencies
+                    if not isinstance(d, Placeholder))
         while queue:
             k = queue.pop()
             n = new_nodes.get(k, self[k])
@@ -314,7 +319,7 @@ class QuerySpace(object):
         n_notinline = 0
         for cur_key in qspace._dag.keys_topological():
             qspace._make_check(cur_key)
-            cur_node= qspace[cur_key]
+            cur_node = qspace[cur_key]
             if cur_node.issubquery:
                 # QueryTemplates that are subqueries will be rendered
                 # using a WITH statement.
@@ -335,6 +340,7 @@ class QuerySpace(object):
                  ', '.join('%s AS (%s)' % (k, v) for k, v in render_defs[:-1]),
                  render_defs[-1][1])
             )
+
 
 class ModifiableQuerySpace(QuerySpace):
 

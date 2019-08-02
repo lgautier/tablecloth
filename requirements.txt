@@ -1,4 +1,5 @@
 codecov
 coverage
+pycodestyle
 pytest
 pytest-cov
