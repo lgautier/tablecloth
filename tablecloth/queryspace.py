@@ -24,14 +24,25 @@ class NameNotFoundError(Exception):
 
 
 class QueryElement(abc.ABC):
+    """This abstract class acts as an interface for query elements."""
 
     @property
     @abc.abstractmethod
     def dependencies(self):
-        """Tuple of dependency names for the element."""
+        """Tuple of direct dependency names for the element."""
         pass
 
+    @property
+    @abc.abstractmethod
+    def issubquery(self):
+        """Is the query element a itself an SQL query."""
+        pass
 
+    @abc.abstractmethod
+    def compile(self, querybuilder):
+        """"Compile" the SQL query for that element."""
+        pass
+    
 class CyclicDependencyError(Exception):
     """Exception when a new QueryElement introduces a circular dependency."""
     pass
@@ -75,7 +86,7 @@ class QueryBuilder(object):
         if reference_name in self._visited_nodes:
             return self._visited_nodes[reference_name]
         elif reference_name in self._table_map:
-            inline = self._table_map[reference_name]
+            inline = self._table_map[reference_name].compile(self)
             self._visited_nodes[reference_name] = inline
             return inline
         elif reference_name in self._space.available_nodes:
@@ -90,8 +101,43 @@ class QueryBuilder(object):
                     reference_name, from_query))
 
 
+class TableName(QueryElement):
+    """A table name (in a Queryspace).
+
+    The name represents the name of the table as known by an SQL interpreter
+    when the SQL is evaluated.
+    
+    This class is meant to indicate to a QuerySpace instance that a key
+    (node in the subquery dependcy graph) is simply a table name.
+    """
+
+    issubquery = False
+
+    def __init__(self, name):
+        self.name = name
+
+    @property
+    def name(self):
+        return self.__name
+
+    @name.setter
+    def name(self, value):
+        # TODO: check that value is a syntactically valid table name.
+        #    This will facilitate the parametrization of query of the table
+        #    name while preventing SQL injection.
+        self.__name = value
+
+    @property
+    def dependencies(self):
+        # A table always return a empty sequence.
+        return tuple()
+
+    def compile(self, querybuilder):
+        return self.name
+
+
 class QueryTemplate(QueryElement):
-    """A single node in a QuerySpace.
+    """A query template (in a Queryspace).
 
     The node is responsible for identifying its dependencies and
     substituting inline names (either source tables or query nodes)
@@ -103,8 +149,11 @@ class QueryTemplate(QueryElement):
     for its dependencies and to track the necessary with statements.
     """
 
+    issubquery = True
+
     def __init__(self, name, query_text):
         self._name = name
+        assert query_text.lstrip().upper().startswith('SELECT')
         self._query_text = query_text
         dependency_list_dups = re.findall(DEPENDENCY_REGEX, query_text)
         # Remove duplicates will preserving a canonical order.
@@ -165,6 +214,12 @@ class QuerySpace(object):
         return False
 
     def compile(self, target_name, table_map, template_parameters=None):
+        for k, v in table_map.items():
+            if not isinstance(v, TableName):
+                raise TypeError(
+                    '{k} is not an instance of type TableName.'.format(k=k)
+                )
+
         query_builder = QueryBuilder(table_map, self, template_parameters)
         main_query = self.query_node(target_name).compile(query_builder)
 
