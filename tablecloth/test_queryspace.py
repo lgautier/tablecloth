@@ -29,11 +29,11 @@ def test_make_single_node():
     with pytest.raises(TypeError):
         query = space.make(
         'my_query', my_table='source_table')
-        
+
     query = space.make(
         'my_query',
         my_table=queryspace.TableName('source_table'))
-    
+
     assert homogenize(query) == homogenize('''
 SELECT *
 FROM source_table
@@ -115,7 +115,6 @@ def test_reuse_previously_seen_nodes():
       query3 AS (SELECT * FROM query1),
       query2 AS (SELECT * FROM query1)
     SELECT * FROM query2 JOIN query3'''))
-            
 
 
 def test_detect_space_cycles():
