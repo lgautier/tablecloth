@@ -42,7 +42,8 @@ class QueryElement(abc.ABC):
     def compile(self, querybuilder):
         """"Compile" the SQL query for that element."""
         pass
-    
+
+
 class CyclicDependencyError(Exception):
     """Exception when a new QueryElement introduces a circular dependency."""
     pass
@@ -57,8 +58,8 @@ class QueryBuilder(object):
 
     When a QueryElement calls get_inline_name(), the QueryBuilder determines
     if this reference should come from the TableSource or from another
-    QueryElement, makes sure there's a with statement as necessary, then returns
-    the inline name.
+    QueryElement, makes sure there's a with statement as necessary, then
+    returns the inline name.
 
     In cases where the reference is to another QueryElement, the QueryBuilder
     gets the with statement by calling compile() on this query node, passing
@@ -106,7 +107,7 @@ class TableName(QueryElement):
 
     The name represents the name of the table as known by an SQL interpreter
     when the SQL is evaluated.
-    
+
     This class is meant to indicate to a QuerySpace instance that a key
     (node in the subquery dependcy graph) is simply a table name.
     """

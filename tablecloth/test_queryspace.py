@@ -24,8 +24,8 @@ def test_compile_single_node():
     # Fail if not a tablename object.
     with pytest.raises(TypeError):
         query = space.compile(
-        'my_query', {'my_table': 'source_table'})
-        
+            'my_query', {'my_table': 'source_table'})
+
     query = space.compile(
         'my_query',
         {'my_table': queryspace.TableName('source_table')})
