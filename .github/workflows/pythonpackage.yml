@@ -23,6 +23,9 @@ jobs:
       run: |
         pip install flake8
         flake8 tablecloth --count --show-source --statistics
+    - name: Install package
+      run: |
+        python setup.py install
     - name: Test with pytest
       run: |
         pip install -r requirements.txt
