@@ -1,6 +1,7 @@
 # ![GitHub Logo](logo.png) Tablecloth
 
 ![Travis build status](https://travis-ci.com/lgautier/tablecloth.svg?token=xf7sgesS9RQ1p1iLDXo9&branch=master)
+![Github workflow status](https://github.com/rpy2/rpy2/workflows/Python%20package/badge.svg)
 
 ---
 
