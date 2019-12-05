@@ -17,6 +17,10 @@ have a system that generates SQL from Python structures, expressions and library
 from SQL and are using Python to manage dependencies and eventual bookkeeping related to query evaluation.
 Something like an hybrid of SQL pre-processor or a build engine.
 
+## How does it work ?
+
+We currently have a [tutorial as a Jupyter notebooks](https://github.com/lgautier/tablecloth/blob/master/doc/notebooks/tutorial.ipynb).
+
 ## References and relevant links
 
 1. https://www.sqlalchemy.org/
