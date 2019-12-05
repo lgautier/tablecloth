@@ -19,7 +19,7 @@ Something like an hybrid of SQL pre-processor or a build engine.
 
 ## How does it work ?
 
-We currently have a [tutorial as a Jupyter notebooks](https://github.com/lgautier/tablecloth/blob/master/doc/notebooks/tutorial.ipynb).
+We currently have a [tutorial as a Jupyter notebook](https://github.com/lgautier/tablecloth/blob/master/doc/notebooks/tutorial.ipynb).
 
 ## References and relevant links
 
